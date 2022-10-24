@@ -34,6 +34,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 
 	"github.com/mcandeia/dapr-pluggable-components-operator/controllers"
+
+	componentsapi "github.com/dapr/dapr/pkg/apis/components/v1alpha1"
 	//+kubebuilder:scaffold:imports
 )
 
@@ -48,7 +50,7 @@ const (
 
 func init() {
 	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
-
+	utilruntime.Must(componentsapi.AddToScheme(scheme))
 	//+kubebuilder:scaffold:scheme
 }
 

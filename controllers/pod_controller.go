@@ -18,7 +18,9 @@ package controllers
 
 import (
 	"context"
+	"sort"
 	"strings"
+	"time"
 
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -34,9 +36,12 @@ import (
 )
 
 const (
-	autoInjectComponentsEnabledPodLabel = "components.dapr.io/enabled"
-	daprEnabledPodLabel                 = "dapr.io/enabled"
-	appIdPodLabel                       = "dapr.io/app-id"
+	autoInjectComponentsEnabledAnnotation = "components.dapr.io/enabled"
+	daprEnabledAnnotation                 = "dapr.io/enabled"
+	appIDAnnotation                       = "dapr.io/app-id"
+	pluggableComponentsAnnotation         = "dapr.io/pluggable-components"
+	defaultSocketPath                     = "/tmp/dapr-components-sockets"
+	daprUnixDomainSocketVolumeName        = "dapr-unix-domain-socket"
 )
 
 // PodReconciler reconciles a Pod object
@@ -71,12 +76,17 @@ func (r *PodReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.R
 		return ctrl.Result{}, err
 	}
 
-	shouldBeManaged := pod.Annotations[daprEnabledPodLabel] == "true" && pod.Annotations[autoInjectComponentsEnabledPodLabel] == "true"
-	if !shouldBeManaged {
+	if pod.DeletionTimestamp != nil {
 		return ctrl.Result{}, nil
 	}
 
-	appID := pod.Annotations[appIdPodLabel]
+	shouldBeManaged := pod.Annotations[daprEnabledAnnotation] == "true" && pod.Annotations[autoInjectComponentsEnabledAnnotation] == "true"
+	if !shouldBeManaged {
+		log.Info("pod should not be managed")
+		return ctrl.Result{}, nil
+	}
+
+	appID := pod.Annotations[appIDAnnotation]
 
 	var components componentsapi.ComponentList
 
@@ -86,7 +96,21 @@ func (r *PodReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.R
 		return ctrl.Result{}, errors.Wrap(err, "error getting components")
 	}
 
-	pluggableComponentContainers := make([]string, 0)
+	componentContainers := make(map[string]bool)
+
+	var annotatedComponents []string
+	annotated := pod.Annotations[pluggableComponentsAnnotation]
+	if annotated == "" {
+		annotatedComponents = make([]string, 0)
+	} else {
+		annotatedComponents = strings.Split(pod.Annotations[pluggableComponentsAnnotation], ",")
+	}
+
+	for _, containerName := range annotatedComponents {
+		componentContainers[containerName] = true
+	}
+
+	spec := pod.Spec
 	for _, component := range components.Items {
 		typeName := strings.Split(component.Spec.Type, ".")
 		if len(typeName) < 2 { // invalid name
@@ -103,25 +127,83 @@ func (r *PodReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.R
 
 		if appScopped {
 			podPreset := r.Presets[typeName[1]]
-			if err := mergo.MergeWithOverwrite(&pod, podPreset); err != nil {
+			containsContainer := false
+			for _, container := range podPreset.Containers {
+				_, ok := componentContainers[container.Name]
+				if ok { // already contains the container.
+					containsContainer = true
+					break
+				}
+				componentContainers[container.Name] = true
+			}
+
+			if containsContainer {
+				continue
+			}
+
+			if err := mergo.Merge(&spec, podPreset, mergo.WithAppendSlice); err != nil {
 				log.Error(err, "unable to merge preset")
 				return ctrl.Result{}, err
 			}
 
-			for _, container := range podPreset.Containers {
-				pluggableComponentContainers = append(pluggableComponentContainers, container.Name)
-			}
 		}
 	}
 
-	pod.Annotations["dapr.io/pluggable-components"] = strings.Join(pluggableComponentContainers, ",")
-	err := r.Update(ctx, &pod)
+	componentContainersList := make([]string, len(componentContainers))
+	idx := 0
+	for containerName := range componentContainers {
+		componentContainersList[idx] = containerName
+		idx++
+	}
+
+	sort.Strings(componentContainersList) // to keep consistency
+
+	newPluggableComponentsAnnotation := strings.Join(componentContainersList, ",")
+	if newPluggableComponentsAnnotation == pod.Annotations[pluggableComponentsAnnotation] { // nothing changes
+		return ctrl.Result{}, nil
+	}
+
+	err := r.Delete(ctx, &pod)
+	if apierrors.IsConflict(err) {
+		log.Error(err, "conflict while deleting pod")
+		return ctrl.Result{}, nil
+	}
+
+	pod.Annotations[pluggableComponentsAnnotation] = newPluggableComponentsAnnotation
+	pod.Spec = spec
+	pod.ResourceVersion = ""
+	pod.UID = ""
+	pod.Name = ""
+
+	socketVolume := corev1.Volume{
+		Name: daprUnixDomainSocketVolumeName,
+		VolumeSource: corev1.VolumeSource{
+			EmptyDir: &corev1.EmptyDirVolumeSource{},
+		},
+	}
+	pod.Spec.Volumes = append(pod.Spec.Volumes, socketVolume)
+
+	for idx, container := range pod.Spec.Containers {
+		if componentContainers[container.Name] || container.Name == "daprd" {
+			container.VolumeMounts = append(container.VolumeMounts, corev1.VolumeMount{
+				Name:      daprUnixDomainSocketVolumeName,
+				MountPath: defaultSocketPath,
+			})
+			pod.Spec.Containers[idx] = container
+		}
+	}
+	err = r.Create(ctx, &pod)
+
+	if apierrors.IsConflict(err) {
+		log.Error(err, "conflict while creating pod")
+		return ctrl.Result{}, nil
+	}
+
 	if err != nil {
 		log.Error(err, "unable to update pod")
+		return ctrl.Result{RequeueAfter: time.Second * 10}, err
 	}
-	return ctrl.Result{
-		Requeue: err != nil,
-	}, err
+	return ctrl.Result{}, nil
 }
 
 // SetupWithManager sets up the controller with the Manager.
