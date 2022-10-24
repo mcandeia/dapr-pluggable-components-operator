@@ -86,6 +86,7 @@ func (r *PodReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.R
 		return ctrl.Result{}, errors.Wrap(err, "error getting components")
 	}
 
+	pluggableComponentContainers := make([]string, 0)
 	for _, component := range components.Items {
 		typeName := strings.Split(component.Spec.Type, ".")
 		if len(typeName) < 2 { // invalid name
@@ -101,13 +102,19 @@ func (r *PodReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.R
 		}
 
 		if appScopped {
-			if err := mergo.MergeWithOverwrite(&pod, r.Presets[typeName[1]]); err != nil {
+			podPreset := r.Presets[typeName[1]]
+			if err := mergo.MergeWithOverwrite(&pod, podPreset); err != nil {
 				log.Error(err, "unable to merge preset")
 				return ctrl.Result{}, err
+			}
+
+			for _, container := range podPreset.Containers {
+				pluggableComponentContainers = append(pluggableComponentContainers, container.Name)
 			}
 		}
 	}
 
+	pod.Annotations["dapr.io/pluggable-components"] = strings.Join(pluggableComponentContainers, ",")
 	err := r.Update(ctx, &pod)
 	if err != nil {
 		log.Error(err, "unable to update pod")
