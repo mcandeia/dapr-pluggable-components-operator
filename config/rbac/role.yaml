@@ -1,0 +1,27 @@
+kind: ClusterRole
+apiVersion: rbac.authorization.k8s.io/v1
+metadata:
+  name: manager-role
+  labels:
+    app.kubernetes.io/name: clusterrole
+    app.kubernetes.io/instance: controller-role
+    app.kubernetes.io/component: dapr-pluggable-components-operator-controller
+    app.kubernetes.io/created-by: dapr-pluggable-components-operator
+    app.kubernetes.io/part-of: dapr-pluggable-components-operator
+    app.kubernetes.io/managed-by: kustomize
+rules:
+  - apiGroups: ["apps"]
+    resources: ["deployments", "deployments/finalizers"]
+    verbs: ["get", "list", "watch", "update"]
+  - apiGroups: ["apps"]
+    resources: ["statefulsets", "statefulsets/finalizers"]
+    verbs: ["get", "list", "watch", "update", "create"]
+  - apiGroups: [""]
+    resources: ["pods", "services", "services/finalizers"]
+    verbs: ["get", "list", "watch", "update", "create", "delete"]
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    verbs: ["get", "update", "create"]
+  - apiGroups: ["dapr.io"]
+    resources: ["components"]
+    verbs: ["get", "list", "watch"]

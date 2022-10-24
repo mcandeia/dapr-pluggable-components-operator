@@ -40,6 +40,10 @@ var (
 	setupLog = ctrl.Log.WithName("setup")
 )
 
+const (
+	componentsPresetsEnvVar = "DAPR_COMPONENTS_PRESETS"
+)
+
 func init() {
 	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
 

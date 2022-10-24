@@ -18,20 +18,32 @@ package controllers
 
 import (
 	"context"
+	"strings"
 
-	daprv1alpha1 "github.com/dapr/dapr/pkg/apis/components/v1alpha1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
+
+	componentsapi "github.com/dapr/dapr/pkg/apis/components/v1alpha1"
+	"github.com/imdario/mergo"
+	"github.com/pkg/errors"
+)
+
+const (
+	autoInjectComponentsEnabledPodLabel = "components.dapr.io/enabled"
+	daprEnabledPodLabel                 = "dapr.io/enabled"
+	appIdPodLabel                       = "dapr.io/app-id"
 )
 
 // PodReconciler reconciles a Pod object
 type PodReconciler struct {
 	client.Client
-	Scheme *runtime.Scheme
+	Scheme  *runtime.Scheme
+	Presets map[string]corev1.PodSpec
 }
 
 //+kubebuilder:rbac:groups=core,resources=pods,verbs=get;list;watch;create;update;patch;delete
@@ -47,17 +59,67 @@ type PodReconciler struct {
 // For more details, check Reconcile and its Result here:
 // - https://pkg.go.dev/sigs.k8s.io/controller-runtime@v0.13.0/pkg/reconcile
 func (r *PodReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
-	_ = log.FromContext(ctx)
+	log := log.FromContext(ctx)
 
-	// TODO(user): your logic here
+	var pod corev1.Pod
+	if err := r.Get(ctx, req.NamespacedName, &pod); err != nil {
+		if apierrors.IsNotFound(err) {
+			// we'll ignore not-found errors, since we can get them on deleted requests.
+			return ctrl.Result{}, nil
+		}
+		log.Error(err, "unable to fetch Pod")
+		return ctrl.Result{}, err
+	}
 
-	return ctrl.Result{}, nil
+	shouldBeManaged := pod.Annotations[daprEnabledPodLabel] == "true" && pod.Annotations[autoInjectComponentsEnabledPodLabel] == "true"
+	if !shouldBeManaged {
+		return ctrl.Result{}, nil
+	}
+
+	appID := pod.Annotations[appIdPodLabel]
+
+	var components componentsapi.ComponentList
+
+	if err := r.List(ctx, &components, &client.ListOptions{
+		Namespace: pod.Namespace,
+	}); err != nil {
+		return ctrl.Result{}, errors.Wrap(err, "error getting components")
+	}
+
+	for _, component := range components.Items {
+		typeName := strings.Split(component.Spec.Type, ".")
+		if len(typeName) < 2 { // invalid name
+			continue
+		}
+
+		appScopped := len(component.Scopes) == 0
+		for _, scoppedApp := range component.Scopes {
+			if scoppedApp == appID {
+				appScopped = true
+				break
+			}
+		}
+
+		if appScopped {
+			if err := mergo.MergeWithOverwrite(&pod, r.Presets[typeName[1]]); err != nil {
+				log.Error(err, "unable to merge preset")
+				return ctrl.Result{}, err
+			}
+		}
+	}
+
+	err := r.Update(ctx, &pod)
+	if err != nil {
+		log.Error(err, "unable to update pod")
+	}
+	return ctrl.Result{
+		Requeue: err != nil,
+	}, err
 }
 
 // SetupWithManager sets up the controller with the Manager.
 func (r *PodReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&corev1.Pod{}).
-		For(&daprv1alpha1.Component{}).
 		Complete(r)
 }
