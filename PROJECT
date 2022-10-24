@@ -4,7 +4,7 @@ layout:
 plugins:
   manifests.sdk.operatorframework.io/v2: {}
   scorecard.sdk.operatorframework.io/v2: {}
-projectName: dapr-components-containers-controller
+projectName: dapr-pluggable-components-operator
 repo: github.com/mcandeia/dapr-pluggable-components-operator
 resources:
 - controller: true
