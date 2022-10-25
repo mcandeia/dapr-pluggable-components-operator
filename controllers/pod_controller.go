@@ -37,8 +37,8 @@ import (
 )
 
 const (
+	checkSumComponentsPodLabel            = "components.dapr.io/checksum"
 	autoInjectComponentsEnabledAnnotation = "components.dapr.io/enabled"
-	checkSumComponentsAnnotation          = "components.dapr.io/checksum"
 	containerImageAnnotation              = "components.dapr.io/container-image"
 	volumeMountsAnnotation                = "components.dapr.io/container-volume-mounts"
 	containerEnvAnnotation                = "components.dapr.io/container-env"
@@ -206,7 +206,7 @@ func (r *PodReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.R
 		return ctrl.Result{}, err
 	}
 
-	if hash == pod.Annotations[checkSumComponentsAnnotation] { // nothing has changed
+	if hash == pod.Labels[checkSumComponentsPodLabel] { // nothing has changed
 		return ctrl.Result{}, nil
 	}
 
@@ -216,7 +216,7 @@ func (r *PodReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.R
 		return ctrl.Result{}, err
 	}
 
-	pod.Annotations[checkSumComponentsAnnotation] = hash
+	pod.Labels[checkSumComponentsPodLabel] = hash
 	pod.ResourceVersion = ""
 	pod.UID = ""
 	pod.Name = pod.Name + "-patched"
