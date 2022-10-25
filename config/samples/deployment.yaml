@@ -21,14 +21,3 @@ spec:
       containers:
         - name: "test"
           image: "kennethreitz/httpbin"
----
-apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: dapr-components-presets
-data:
-  presets: |
-    memory-pluggable:
-      containers:
-        - name: state-memory
-          image: localhost:5001/state-memory:latest

@@ -1,0 +1,15 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: dapr-components-presets
+  namespace: dapr-pluggable-components-operator-system
+data:
+  presets: |
+    memory-pluggable:
+      containers:
+        - name: state-memory
+          image: localhost:5001/state-memory:latest
+    redis-pluggable:
+      containers:
+        - name: redis
+          image: localhost:5001/state-redis:latest

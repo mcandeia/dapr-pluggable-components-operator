@@ -1,0 +1,71 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: redis
+  labels:
+    app: redis
+spec:
+  containers:
+    - name: redis
+      image: redis:5.0.4
+      command:
+        - redis-server
+      env:
+        - name: MASTER
+          value: "true"
+      ports:
+        - containerPort: 6379
+      resources:
+        limits:
+          cpu: "0.1"
+      volumeMounts:
+        - mountPath: /redis-master-data
+          name: data
+  volumes:
+    - name: data
+      emptyDir: {}
+    - name: config
+      configMap:
+        name: example-redis-config
+        items:
+          - key: redis-config
+            path: redis.conf
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  labels:
+    app: redis-svc
+  name: redis-svc
+spec:
+  ports:
+    - name: redis-server
+      port: 6379
+      protocol: TCP
+      targetPort: 6379
+  selector:
+    app: redis
+  type: ClusterIP
+---
+apiVersion: dapr.io/v1alpha1
+kind: Component
+metadata:
+  name: redis-pluggable
+spec:
+  type: state.redis-pluggable
+  initTimeout: 1m
+  version: v1
+  metadata:
+    - name: redisHost
+      value: redis-svc.default.svc.cluster.local:6379
+    - name: redisPassword
+      value: ""
+    - name: processingTimeout
+      value: 1m
+    - name: redeliverInterval
+      value: 10s
+    - name: idleCheckFrequency
+      value: 5s
+    - name: readTimeout
+      value: 5s

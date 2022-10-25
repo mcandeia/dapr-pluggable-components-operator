@@ -18,9 +18,11 @@ package controllers
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"sort"
 	"strings"
-	"time"
 
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -37,11 +39,13 @@ import (
 
 const (
 	autoInjectComponentsEnabledAnnotation = "components.dapr.io/enabled"
+	checkSumComponentsAnnotation          = "components.dapr.io/checksum"
 	daprEnabledAnnotation                 = "dapr.io/enabled"
 	appIDAnnotation                       = "dapr.io/app-id"
 	pluggableComponentsAnnotation         = "dapr.io/pluggable-components"
 	defaultSocketPath                     = "/tmp/dapr-components-sockets"
-	daprUnixDomainSocketVolumeName        = "dapr-unix-domain-socket"
+	daprComponentsSocketVolumeName        = "dapr-components-unix-domain-socket"
+	daprdContainerName                    = "daprd"
 )
 
 // PodReconciler reconciles a Pod object
@@ -49,6 +53,51 @@ type PodReconciler struct {
 	client.Client
 	Scheme  *runtime.Scheme
 	Presets map[string]corev1.PodSpec
+}
+
+func (r *PodReconciler) mergePresets(spec *corev1.PodSpec, appID string, components []componentsapi.Component) (map[string]bool, string, error) {
+	componentContainers := make(map[string]bool)
+	presetHashes := make([]string, 0)
+	for _, component := range components {
+		typeName := strings.Split(component.Spec.Type, ".")
+		if len(typeName) < 2 { // invalid name
+			continue
+		}
+
+		appScopped := len(component.Scopes) == 0
+		for _, scoppedApp := range component.Scopes {
+			if scoppedApp == appID {
+				appScopped = true
+				break
+			}
+		}
+
+		if appScopped {
+			podPreset := r.Presets[typeName[1]]
+			bts, err := json.Marshal(podPreset)
+			if err != nil {
+				return nil, "", err
+			}
+
+			presetHashes = append(presetHashes, string(bts))
+			for _, container := range podPreset.Containers {
+				componentContainers[container.Name] = true
+			}
+
+			if err := mergo.Merge(spec, podPreset, mergo.WithAppendSlice); err != nil {
+				return nil, "", err
+			}
+		}
+	}
+
+	sort.Strings(presetHashes) // to keep consistency
+	h := sha256.New()
+	_, err := h.Write([]byte(strings.Join(presetHashes, "")))
+	if err != nil {
+		return nil, "", err
+	}
+
+	return componentContainers, hex.EncodeToString(h.Sum(nil)), nil
 }
 
 //+kubebuilder:rbac:groups=core,resources=pods,verbs=get;list;watch;create;update;patch;delete
@@ -82,10 +131,10 @@ func (r *PodReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.R
 
 	shouldBeManaged := pod.Annotations[daprEnabledAnnotation] == "true" && pod.Annotations[autoInjectComponentsEnabledAnnotation] == "true"
 	if !shouldBeManaged {
-		log.Info("pod should not be managed")
 		return ctrl.Result{}, nil
 	}
 
+	// metav1.ListOptions{LabelSelector: "k8s-app=kube-proxy"}
 	appID := pod.Annotations[appIDAnnotation]
 
 	var components componentsapi.ComponentList
@@ -96,57 +145,16 @@ func (r *PodReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.R
 		return ctrl.Result{}, errors.Wrap(err, "error getting components")
 	}
 
-	componentContainers := make(map[string]bool)
-
-	var annotatedComponents []string
-	annotated := pod.Annotations[pluggableComponentsAnnotation]
-	if annotated == "" {
-		annotatedComponents = make([]string, 0)
-	} else {
-		annotatedComponents = strings.Split(pod.Annotations[pluggableComponentsAnnotation], ",")
-	}
-
-	for _, containerName := range annotatedComponents {
-		componentContainers[containerName] = true
-	}
-
 	spec := pod.Spec
-	for _, component := range components.Items {
-		typeName := strings.Split(component.Spec.Type, ".")
-		if len(typeName) < 2 { // invalid name
-			continue
-		}
+	componentContainers, hash, err := r.mergePresets(&spec, appID, components.Items)
 
-		appScopped := len(component.Scopes) == 0
-		for _, scoppedApp := range component.Scopes {
-			if scoppedApp == appID {
-				appScopped = true
-				break
-			}
-		}
+	if err != nil {
+		log.Error(err, "error when merging presets")
+		return ctrl.Result{}, err
+	}
 
-		if appScopped {
-			podPreset := r.Presets[typeName[1]]
-			containsContainer := false
-			for _, container := range podPreset.Containers {
-				_, ok := componentContainers[container.Name]
-				if ok { // already contains the container.
-					containsContainer = true
-					break
-				}
-				componentContainers[container.Name] = true
-			}
-
-			if containsContainer {
-				continue
-			}
-
-			if err := mergo.Merge(&spec, podPreset, mergo.WithAppendSlice); err != nil {
-				log.Error(err, "unable to merge preset")
-				return ctrl.Result{}, err
-			}
-
-		}
+	if hash == pod.Annotations[checkSumComponentsAnnotation] { // nothing has changed
+		return ctrl.Result{}, nil
 	}
 
 	componentContainersList := make([]string, len(componentContainers))
@@ -156,54 +164,47 @@ func (r *PodReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.R
 		idx++
 	}
 
-	sort.Strings(componentContainersList) // to keep consistency
+	originalPod := pod
 
-	newPluggableComponentsAnnotation := strings.Join(componentContainersList, ",")
-	if newPluggableComponentsAnnotation == pod.Annotations[pluggableComponentsAnnotation] { // nothing changes
-		return ctrl.Result{}, nil
-	}
-
-	err := r.Delete(ctx, &pod)
-	if apierrors.IsConflict(err) {
-		log.Error(err, "conflict while deleting pod")
-		return ctrl.Result{}, nil
-	}
-
-	pod.Annotations[pluggableComponentsAnnotation] = newPluggableComponentsAnnotation
+	pod.Annotations[checkSumComponentsAnnotation] = hash
+	pod.Annotations[pluggableComponentsAnnotation] = strings.Join(componentContainersList, ",")
 	pod.Spec = spec
 	pod.ResourceVersion = ""
 	pod.UID = ""
 	pod.Name = ""
-
-	socketVolume := corev1.Volume{
-		Name: daprUnixDomainSocketVolumeName,
+	// add unix socket volume
+	pod.Spec.Volumes = append(pod.Spec.Volumes, corev1.Volume{
+		Name: daprComponentsSocketVolumeName,
 		VolumeSource: corev1.VolumeSource{
 			EmptyDir: &corev1.EmptyDirVolumeSource{},
 		},
-	}
-	pod.Spec.Volumes = append(pod.Spec.Volumes, socketVolume)
+	})
 
 	for idx, container := range pod.Spec.Containers {
-		if componentContainers[container.Name] || container.Name == "daprd" {
+		// mount volume in desired containers.
+		if componentContainers[container.Name] || container.Name == daprdContainerName {
 			container.VolumeMounts = append(container.VolumeMounts, corev1.VolumeMount{
-				Name:      daprUnixDomainSocketVolumeName,
+				Name:      daprComponentsSocketVolumeName,
 				MountPath: defaultSocketPath,
 			})
 			pod.Spec.Containers[idx] = container
 		}
 	}
+
+	// create first then delete later.
 	err = r.Create(ctx, &pod)
-
-	if apierrors.IsConflict(err) {
-		log.Error(err, "conflict while creating pod")
-		return ctrl.Result{}, nil
-	}
-
 	if err != nil {
-		log.Error(err, "unable to update pod")
-		return ctrl.Result{RequeueAfter: time.Second * 10}, err
+		log.Error(err, "unable to create pod")
+		return ctrl.Result{}, err
 	}
-	return ctrl.Result{}, nil
+
+	err = r.Delete(ctx, &originalPod)
+	if err != nil {
+		log.Error(err, "unable to delete pod")
+		return ctrl.Result{}, err
+	}
+
+	return ctrl.Result{}, err
 }
 
 // SetupWithManager sets up the controller with the Manager.
