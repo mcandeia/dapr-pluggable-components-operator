@@ -22,6 +22,7 @@ import (
 
 	// Import all Kubernetes client auth plugins (e.g. Azure, GCP, OIDC, etc.)
 	// to ensure that exec-entrypoint and run can make use of them.
+
 	_ "k8s.io/client-go/plugin/pkg/client/auth"
 
 	"k8s.io/apimachinery/pkg/runtime"
@@ -32,6 +33,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 
 	"github.com/mcandeia/dapr-pluggable-components-operator/controllers"
+
+	componentsapi "github.com/dapr/dapr/pkg/apis/components/v1alpha1"
 	//+kubebuilder:scaffold:imports
 )
 
@@ -42,7 +45,7 @@ var (
 
 func init() {
 	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
-
+	utilruntime.Must(componentsapi.AddToScheme(scheme))
 	//+kubebuilder:scaffold:scheme
 }
 
