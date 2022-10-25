@@ -69,14 +69,5 @@ spec:
             requests:
               cpu: 10m
               memory: 64Mi
-          env:
-            # Define the environment variable
-            - name: DAPR_COMPONENTS_PRESETS
-              valueFrom:
-                configMapKeyRef:
-                  # The ConfigMap containing the value you want to assign to SPECIAL_LEVEL_KEY
-                  name: dapr-components-presets
-                  # Specify the key associated with the value
-                  key: presets
       serviceAccountName: controller-manager
       terminationGracePeriodSeconds: 10

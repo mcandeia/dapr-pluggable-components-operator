@@ -22,8 +22,7 @@ import (
 
 	// Import all Kubernetes client auth plugins (e.g. Azure, GCP, OIDC, etc.)
 	// to ensure that exec-entrypoint and run can make use of them.
-	"gopkg.in/yaml.v2"
-	corev1 "k8s.io/api/core/v1"
+
 	_ "k8s.io/client-go/plugin/pkg/client/auth"
 
 	"k8s.io/apimachinery/pkg/runtime"
@@ -42,10 +41,6 @@ import (
 var (
 	scheme   = runtime.NewScheme()
 	setupLog = ctrl.Log.WithName("setup")
-)
-
-const (
-	componentsPresetsEnvVar = "DAPR_COMPONENTS_PRESETS"
 )
 
 func init() {
@@ -95,17 +90,9 @@ func main() {
 		os.Exit(1)
 	}
 
-	var presets map[string]corev1.PodSpec
-
-	if err := yaml.Unmarshal([]byte(os.Getenv(componentsPresetsEnvVar)), &presets); err != nil {
-		setupLog.Error(err, "unable to unmarshal presets", "presets", "Pod")
-		os.Exit(1)
-	}
-
 	if err = (&controllers.PodReconciler{
-		Client:  mgr.GetClient(),
-		Scheme:  mgr.GetScheme(),
-		Presets: presets,
+		Client: mgr.GetClient(),
+		Scheme: mgr.GetScheme(),
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "Pod")
 		os.Exit(1)

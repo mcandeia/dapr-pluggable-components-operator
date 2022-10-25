@@ -20,7 +20,6 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
-	"encoding/json"
 	"sort"
 	"strings"
 
@@ -33,16 +32,15 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	componentsapi "github.com/dapr/dapr/pkg/apis/components/v1alpha1"
-	"github.com/imdario/mergo"
 	"github.com/pkg/errors"
 )
 
 const (
 	autoInjectComponentsEnabledAnnotation = "components.dapr.io/enabled"
 	checkSumComponentsAnnotation          = "components.dapr.io/checksum"
+	containerImageAnnotation              = "components.dapr.io/image"
 	daprEnabledAnnotation                 = "dapr.io/enabled"
 	appIDAnnotation                       = "dapr.io/app-id"
-	pluggableComponentsAnnotation         = "dapr.io/pluggable-components"
 	defaultSocketPath                     = "/tmp/dapr-components-sockets"
 	daprComponentsSocketVolumeName        = "dapr-components-unix-domain-socket"
 	daprdContainerName                    = "daprd"
@@ -51,14 +49,17 @@ const (
 // PodReconciler reconciles a Pod object
 type PodReconciler struct {
 	client.Client
-	Scheme  *runtime.Scheme
-	Presets map[string]corev1.PodSpec
+	Scheme *runtime.Scheme
 }
 
-func (r *PodReconciler) mergePresets(spec *corev1.PodSpec, appID string, components []componentsapi.Component) (map[string]bool, string, error) {
-	componentContainers := make(map[string]bool)
+func (r *PodReconciler) getContainers(sharedSocketVolumeMount corev1.VolumeMount, appID string, components []componentsapi.Component) ([]corev1.Container, string, error) {
+	componentContainers := make([]corev1.Container, 0)
 	presetHashes := make([]string, 0)
 	for _, component := range components {
+		containerImage := component.Annotations[containerImageAnnotation]
+		if containerImage == "" {
+			continue
+		}
 		typeName := strings.Split(component.Spec.Type, ".")
 		if len(typeName) < 2 { // invalid name
 			continue
@@ -73,20 +74,12 @@ func (r *PodReconciler) mergePresets(spec *corev1.PodSpec, appID string, compone
 		}
 
 		if appScopped {
-			podPreset := r.Presets[typeName[1]]
-			bts, err := json.Marshal(podPreset)
-			if err != nil {
-				return nil, "", err
-			}
-
-			presetHashes = append(presetHashes, string(bts))
-			for _, container := range podPreset.Containers {
-				componentContainers[container.Name] = true
-			}
-
-			if err := mergo.Merge(spec, podPreset, mergo.WithAppendSlice); err != nil {
-				return nil, "", err
-			}
+			presetHashes = append(presetHashes, containerImage)
+			componentContainers = append(componentContainers, corev1.Container{
+				Name:         component.Name,
+				Image:        containerImage,
+				VolumeMounts: []corev1.VolumeMount{sharedSocketVolumeMount},
+			})
 		}
 	}
 
@@ -145,11 +138,14 @@ func (r *PodReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.R
 		return ctrl.Result{}, errors.Wrap(err, "error getting components")
 	}
 
-	spec := pod.Spec
-	componentContainers, hash, err := r.mergePresets(&spec, appID, components.Items)
+	sharedSocketVolumeMount := corev1.VolumeMount{
+		Name:      daprComponentsSocketVolumeName,
+		MountPath: defaultSocketPath,
+	}
+	componentContainers, hash, err := r.getContainers(sharedSocketVolumeMount, appID, components.Items)
 
 	if err != nil {
-		log.Error(err, "error when merging presets")
+		log.Error(err, "error when getting containers")
 		return ctrl.Result{}, err
 	}
 
@@ -157,18 +153,9 @@ func (r *PodReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.R
 		return ctrl.Result{}, nil
 	}
 
-	componentContainersList := make([]string, len(componentContainers))
-	idx := 0
-	for containerName := range componentContainers {
-		componentContainersList[idx] = containerName
-		idx++
-	}
-
 	originalPod := pod
 
 	pod.Annotations[checkSumComponentsAnnotation] = hash
-	pod.Annotations[pluggableComponentsAnnotation] = strings.Join(componentContainersList, ",")
-	pod.Spec = spec
 	pod.ResourceVersion = ""
 	pod.UID = ""
 	pod.Name = ""
@@ -180,13 +167,11 @@ func (r *PodReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.R
 		},
 	})
 
+	pod.Spec.Containers = append(pod.Spec.Containers, componentContainers...)
+
 	for idx, container := range pod.Spec.Containers {
-		// mount volume in desired containers.
-		if componentContainers[container.Name] || container.Name == daprdContainerName {
-			container.VolumeMounts = append(container.VolumeMounts, corev1.VolumeMount{
-				Name:      daprComponentsSocketVolumeName,
-				MountPath: defaultSocketPath,
-			})
+		if container.Name == daprdContainerName {
+			container.VolumeMounts = append(container.VolumeMounts, sharedSocketVolumeMount)
 			pod.Spec.Containers[idx] = container
 		}
 	}
