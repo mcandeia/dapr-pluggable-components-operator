@@ -32,6 +32,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	componentsapi "github.com/dapr/dapr/pkg/apis/components/v1alpha1"
+
 	"github.com/pkg/errors"
 )
 
@@ -54,6 +55,29 @@ type PodReconciler struct {
 	Scheme *runtime.Scheme
 }
 
+// toEnvVariables converts from component env annotations to container env variables.
+func toEnvVariables(envAnnotation string) []corev1.EnvVar {
+	envVars := make([]corev1.EnvVar, 0)
+	if envAnnotation == "" {
+		return envVars
+	}
+
+	envs := strings.Split(envAnnotation, ",")
+
+	for _, envVar := range envs {
+		nameAndValue := strings.Split(envVar, ";")
+		if len(nameAndValue) != 2 {
+			continue
+		}
+		envVars = append(envVars, corev1.EnvVar{
+			Name:  nameAndValue[0],
+			Value: nameAndValue[1],
+		})
+	}
+	return envVars
+}
+
+// toVolumeMounts convert from component mount volumes annotation to pod volume mounts and defaults to emptyDir volumes.
 func toVolumeMounts(mountAnnotation string) ([]corev1.VolumeMount, []corev1.Volume) {
 	volumeMounts := make([]corev1.VolumeMount, 0)
 	volumes := make([]corev1.Volume, 0)
@@ -80,6 +104,8 @@ func toVolumeMounts(mountAnnotation string) ([]corev1.VolumeMount, []corev1.Volu
 	}
 	return volumeMounts, volumes
 }
+
+// getContainers return all required containers for such appID based on declared components.
 func (r *PodReconciler) getContainers(sharedSocketVolumeMount corev1.VolumeMount, appID string, components []componentsapi.Component) ([]corev1.Container, []corev1.Volume, string, error) {
 	componentContainers := make([]corev1.Container, 0)
 	volumes := make([]corev1.Volume, 0)
@@ -130,13 +156,6 @@ func (r *PodReconciler) getContainers(sharedSocketVolumeMount corev1.VolumeMount
 
 // Reconcile is part of the main kubernetes reconciliation loop which aims to
 // move the current state of the cluster closer to the desired state.
-// TODO(user): Modify the Reconcile function to compare the state specified by
-// the Pod object against the actual cluster state, and then
-// perform operations to make the cluster state reflect the state specified by
-// the user.
-//
-// For more details, check Reconcile and its Result here:
-// - https://pkg.go.dev/sigs.k8s.io/controller-runtime@v0.13.0/pkg/reconcile
 func (r *PodReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	log := log.FromContext(ctx)
 
@@ -159,7 +178,6 @@ func (r *PodReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.R
 		return ctrl.Result{}, nil
 	}
 
-	// metav1.ListOptions{LabelSelector: "k8s-app=kube-proxy"}
 	appID := pod.Annotations[appIDAnnotation]
 
 	var components componentsapi.ComponentList
@@ -167,6 +185,9 @@ func (r *PodReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.R
 	if err := r.List(ctx, &components, &client.ListOptions{
 		Namespace: pod.Namespace,
 	}); err != nil {
+		if apierrors.IsNotFound(err) {
+			return ctrl.Result{}, nil
+		}
 		return ctrl.Result{}, errors.Wrap(err, "error getting components")
 	}
 
@@ -174,8 +195,8 @@ func (r *PodReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.R
 		Name:      daprComponentsSocketVolumeName,
 		MountPath: defaultSocketPath,
 	}
-	componentContainers, requiredContainersVolumes, hash, err := r.getContainers(sharedSocketVolumeMount, appID, components.Items)
 
+	componentContainers, requiredContainersVolumes, hash, err := r.getContainers(sharedSocketVolumeMount, appID, components.Items)
 	if err != nil {
 		log.Error(err, "error when getting containers")
 		return ctrl.Result{}, err
@@ -185,14 +206,17 @@ func (r *PodReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.R
 		return ctrl.Result{}, nil
 	}
 
-	originalPod := pod
+	err = r.Delete(ctx, &pod)
+	if err != nil {
+		log.Error(err, "unable to delete pod")
+		return ctrl.Result{}, err
+	}
 
 	pod.Annotations[checkSumComponentsAnnotation] = hash
 	pod.ResourceVersion = ""
 	pod.UID = ""
-	pod.Name = ""
 	// add unix socket volume
-	pod.Spec.Volumes = append(pod.Spec.Volumes, corev1.Volume{
+	requiredContainersVolumes = append(requiredContainersVolumes, corev1.Volume{
 		Name: daprComponentsSocketVolumeName,
 		VolumeSource: corev1.VolumeSource{
 			EmptyDir: &corev1.EmptyDirVolumeSource{},
@@ -220,17 +244,9 @@ func (r *PodReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.R
 		}
 	}
 
-	// create first then delete later.
 	err = r.Create(ctx, &pod)
 	if err != nil {
 		log.Error(err, "unable to create pod")
-		return ctrl.Result{}, err
-	}
-
-	err = r.Delete(ctx, &originalPod)
-	if err != nil {
-		log.Error(err, "unable to delete pod")
-		return ctrl.Result{}, err
 	}
 
 	return ctrl.Result{}, err
