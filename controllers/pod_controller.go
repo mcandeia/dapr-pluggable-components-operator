@@ -38,7 +38,9 @@ import (
 const (
 	autoInjectComponentsEnabledAnnotation = "components.dapr.io/enabled"
 	checkSumComponentsAnnotation          = "components.dapr.io/checksum"
-	containerImageAnnotation              = "components.dapr.io/image"
+	containerImageAnnotation              = "components.dapr.io/container-image"
+	volumeMountsAnnotation                = "components.dapr.io/container-volume-mounts"
+	containerEnvAnnotation                = "components.dapr.io/container-env"
 	daprEnabledAnnotation                 = "dapr.io/enabled"
 	appIDAnnotation                       = "dapr.io/app-id"
 	defaultSocketPath                     = "/tmp/dapr-components-sockets"
@@ -52,14 +54,42 @@ type PodReconciler struct {
 	Scheme *runtime.Scheme
 }
 
-func (r *PodReconciler) getContainers(sharedSocketVolumeMount corev1.VolumeMount, appID string, components []componentsapi.Component) ([]corev1.Container, string, error) {
+func toVolumeMounts(mountAnnotation string) ([]corev1.VolumeMount, []corev1.Volume) {
+	volumeMounts := make([]corev1.VolumeMount, 0)
+	volumes := make([]corev1.Volume, 0)
+	if mountAnnotation == "" {
+		return volumeMounts, volumes
+	}
+
+	mounts := strings.Split(mountAnnotation, ",")
+	for _, mount := range mounts {
+		volumeAndPath := strings.Split(mount, ";")
+		if len(volumeAndPath) != 2 {
+			continue
+		}
+		volumeMounts = append(volumeMounts, corev1.VolumeMount{
+			Name:      volumeAndPath[0],
+			MountPath: volumeAndPath[1],
+		})
+		volumes = append(volumes, corev1.Volume{
+			Name: volumeAndPath[0],
+			VolumeSource: corev1.VolumeSource{
+				EmptyDir: &corev1.EmptyDirVolumeSource{},
+			},
+		})
+	}
+	return volumeMounts, volumes
+}
+func (r *PodReconciler) getContainers(sharedSocketVolumeMount corev1.VolumeMount, appID string, components []componentsapi.Component) ([]corev1.Container, []corev1.Volume, string, error) {
 	componentContainers := make([]corev1.Container, 0)
+	volumes := make([]corev1.Volume, 0)
 	presetHashes := make([]string, 0)
 	for _, component := range components {
 		containerImage := component.Annotations[containerImageAnnotation]
 		if containerImage == "" {
 			continue
 		}
+
 		typeName := strings.Split(component.Spec.Type, ".")
 		if len(typeName) < 2 { // invalid name
 			continue
@@ -74,11 +104,13 @@ func (r *PodReconciler) getContainers(sharedSocketVolumeMount corev1.VolumeMount
 		}
 
 		if appScopped {
+			volumeMounts, podVolumes := toVolumeMounts(component.Annotations[volumeMountsAnnotation])
+			volumes = append(volumes, podVolumes...)
 			presetHashes = append(presetHashes, containerImage)
 			componentContainers = append(componentContainers, corev1.Container{
 				Name:         component.Name,
 				Image:        containerImage,
-				VolumeMounts: []corev1.VolumeMount{sharedSocketVolumeMount},
+				VolumeMounts: append(volumeMounts, sharedSocketVolumeMount),
 			})
 		}
 	}
@@ -87,10 +119,10 @@ func (r *PodReconciler) getContainers(sharedSocketVolumeMount corev1.VolumeMount
 	h := sha256.New()
 	_, err := h.Write([]byte(strings.Join(presetHashes, "")))
 	if err != nil {
-		return nil, "", err
+		return nil, nil, "", err
 	}
 
-	return componentContainers, hex.EncodeToString(h.Sum(nil)), nil
+	return componentContainers, volumes, hex.EncodeToString(h.Sum(nil)), nil
 }
 
 //+kubebuilder:rbac:groups=core,resources=pods,verbs=get;list;watch;create;update;patch;delete
@@ -142,7 +174,7 @@ func (r *PodReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.R
 		Name:      daprComponentsSocketVolumeName,
 		MountPath: defaultSocketPath,
 	}
-	componentContainers, hash, err := r.getContainers(sharedSocketVolumeMount, appID, components.Items)
+	componentContainers, requiredContainersVolumes, hash, err := r.getContainers(sharedSocketVolumeMount, appID, components.Items)
 
 	if err != nil {
 		log.Error(err, "error when getting containers")
@@ -173,6 +205,18 @@ func (r *PodReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.R
 		if container.Name == daprdContainerName {
 			container.VolumeMounts = append(container.VolumeMounts, sharedSocketVolumeMount)
 			pod.Spec.Containers[idx] = container
+		}
+	}
+
+	currentPodVolumes := make(map[string]bool, 0)
+	for _, volume := range pod.Spec.Volumes {
+		currentPodVolumes[volume.Name] = true
+	}
+
+	for _, newVolume := range requiredContainersVolumes {
+		if !currentPodVolumes[newVolume.Name] {
+			pod.Spec.Volumes = append(pod.Spec.Volumes, newVolume)
+			currentPodVolumes[newVolume.Name] = true
 		}
 	}
 

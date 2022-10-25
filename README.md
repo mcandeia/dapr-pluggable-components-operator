@@ -38,7 +38,7 @@ spec:
 
 ## Step 3: Annotate your components
 
-Your component is the entrypoint for defining container images for pluggable components, you must set the `components.dapr.io/image` annotation pointing to the desired image that should be used for the pluggable component container.
+Your component is the entrypoint for defining container images for pluggable components, you must set the `components.dapr.io/container-image` annotation pointing to the desired image that should be used for the pluggable component container.
 
 ```yaml
 apiVersion: dapr.io/v1alpha1
@@ -46,7 +46,7 @@ kind: Component
 metadata:
   name: redis-pluggable
   annotations:
-    components.dapr.io/image: "DOCKER_REPO/state-redis:latest" # required
+    components.dapr.io/container-image: "DOCKER_REPO/state-redis:latest" # required
 spec:
   type: state.redis-pluggable
   initTimeout: 1m
@@ -65,6 +65,38 @@ spec:
     - name: readTimeout
       value: 5s
 ```
+
+Optionally you can mount volumes and add env variables into the containers by using the `components.dapr.io/container-volume-mounts` and `components.dapr.io/container-env` annotations and use `;` to separate the volume name and its path and `,` to separate volume mount.
+
+```yaml
+apiVersion: dapr.io/v1alpha1
+kind: Component
+metadata:
+  name: redis-pluggable
+  annotations:
+    components.dapr.io/container-image: "DOCKER_REPO/state-redis:latest" # required
+    components.dapr.io/container-volume-mounts: "volume-name;/volume-path,volume-name-2;/volume-path-2" # optional
+    components.dapr.io/container-env: "env-var;env-var-value,env-var-2;env-var-value-2"
+spec:
+  type: state.redis-pluggable
+  initTimeout: 1m
+  version: v1
+  metadata:
+    - name: redisHost
+      value: redis-svc.default.svc.cluster.local:6379
+    - name: redisPassword
+      value: ""
+    - name: processingTimeout
+      value: 1m
+    - name: redeliverInterval
+      value: 10s
+    - name: idleCheckFrequency
+      value: 5s
+    - name: readTimeout
+      value: 5s
+```
+
+By default the operator creates undeclared volumes as `emptyDir` volumes, if you want a different volume type you should declare it by yourself in your deploments.
 
 # Contributing
 
