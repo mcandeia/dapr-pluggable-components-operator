@@ -77,7 +77,7 @@ kind: Component
 metadata:
   name: redis-pluggable
   annotations:
-    components.dapr.io/image: "localhost:5001/state-redis:latest"
+    components.dapr.io/container-image: "localhost:5001/state-redis:latest"
 spec:
   type: state.redis-pluggable
   initTimeout: 1m
@@ -95,3 +95,15 @@ spec:
       value: 5s
     - name: readTimeout
       value: 5s
+---
+apiVersion: dapr.io/v1alpha1
+kind: Component
+metadata:
+  name: memory-pluggable
+  annotations:
+    components.dapr.io/container-image: "localhost:5001/state-memory:latest"
+spec:
+  type: state.memory-pluggable
+  initTimeout: 1m
+  version: v1
+  metadata: []

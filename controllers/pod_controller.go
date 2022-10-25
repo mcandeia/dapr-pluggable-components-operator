@@ -141,6 +141,10 @@ func (r *PodReconciler) getContainers(sharedSocketVolumeMount corev1.VolumeMount
 		}
 	}
 
+	if len(componentContainers) == 0 {
+		return componentContainers, volumes, "", nil
+	}
+
 	sort.Strings(presetHashes) // to keep consistency
 	h := sha256.New()
 	_, err := h.Write([]byte(strings.Join(presetHashes, "")))
@@ -215,6 +219,7 @@ func (r *PodReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.R
 	pod.Annotations[checkSumComponentsAnnotation] = hash
 	pod.ResourceVersion = ""
 	pod.UID = ""
+	pod.Name = pod.Name + "-patched"
 	// add unix socket volume
 	requiredContainersVolumes = append(requiredContainersVolumes, corev1.Volume{
 		Name: daprComponentsSocketVolumeName,
@@ -225,10 +230,23 @@ func (r *PodReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.R
 
 	pod.Spec.Containers = append(pod.Spec.Containers, componentContainers...)
 
+	log.WithValues("containers", len(componentContainers)).Info("adding containers")
+
 	for idx, container := range pod.Spec.Containers {
 		if container.Name == daprdContainerName {
-			container.VolumeMounts = append(container.VolumeMounts, sharedSocketVolumeMount)
-			pod.Spec.Containers[idx] = container
+			isVolumeMounted := false
+
+			for _, volume := range container.VolumeMounts {
+				if volume.Name == sharedSocketVolumeMount.Name {
+					isVolumeMounted = true
+					break
+				}
+			}
+
+			if !isVolumeMounted {
+				container.VolumeMounts = append(container.VolumeMounts, sharedSocketVolumeMount)
+				pod.Spec.Containers[idx] = container
+			}
 		}
 	}
 
@@ -249,7 +267,9 @@ func (r *PodReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.R
 		log.Error(err, "unable to create pod")
 	}
 
-	return ctrl.Result{}, err
+	return ctrl.Result{
+		Requeue: err != nil,
+	}, err
 }
 
 // SetupWithManager sets up the controller with the Manager.

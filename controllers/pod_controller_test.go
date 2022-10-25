@@ -154,9 +154,10 @@ var _ = Describe("Pod custom controller", func() {
 			})
 
 			Expect(err).To(Not(HaveOccurred()))
+			patchedPodType := types.NamespacedName{Name: podName + "-patched", Namespace: podNamespace}
 
 			Eventually(func() error {
-				return k8sClient.Get(ctx, typeNamespaceName, found)
+				return k8sClient.Get(ctx, patchedPodType, found)
 			}, time.Minute, time.Second).Should(Succeed())
 
 			Expect(found.Spec.Containers).To(HaveLen(2))
