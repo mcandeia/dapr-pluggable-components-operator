@@ -13,7 +13,7 @@ helm install my-release my-repo/dapr-pluggable-components-operator
 
 ## Step 2: Annotate your deployments
 
-Your deployment annotations tells if the pluggable components operator should take your pod and inject the containers or not. This is achieved by annotating them with `components.dapr.io/enabled: "true"`. That way your deployments the operator will consider your deployment eligible to inject component containers.
+Your deployment annotations tells if the pluggable components operator should take your pod and inject the containers or not. This is achieved by annotating them with `components.dapr.io/enabled: "true"`. That way the operator considers your deployment eligible to inject component containers.
 
 ```yaml
 apiVersion: apps/v1
