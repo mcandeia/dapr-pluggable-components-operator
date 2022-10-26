@@ -1,5 +1,0 @@
-apiVersion: v1
-appVersion: "0.0.0"
-description: A Helm chart for Dapr pluggable components operator on Kubernetes
-name: dapr-pluggable-components-operator
-version: "0.0.0"
