@@ -49,18 +49,13 @@ Your component is the entrypoint for defining container images for pluggable com
 apiVersion: dapr.io/v1alpha1
 kind: Component
 metadata:
-  name: redis-pluggable
+  name: jsonlogic
   annotations:
-    components.dapr.io/container-image: "DOCKER_REPO/state-redis:latest" # required
+    components.dapr.io/container-image: "ghcr.io/mcandeia/dapr-components:latest"
 spec:
-  type: state.redis-pluggable
-  initTimeout: 1m
+  type: bindings.jsonlogic
   version: v1
-  metadata:
-    - name: redisHost
-      value: redis-svc.default.svc.cluster.local:6379
-    - name: redisPassword
-      value: ""
+  metadata: []
 ```
 
 Optionally you can mount volumes and add env variables into the containers by using the `components.dapr.io/container-volume-mounts` and `components.dapr.io/container-env` annotations and use `;` to separate the volume name and its path and `,` to separate volume mount.
@@ -69,20 +64,15 @@ Optionally you can mount volumes and add env variables into the containers by us
 apiVersion: dapr.io/v1alpha1
 kind: Component
 metadata:
-  name: redis-pluggable
+  name: jsonlogic
   annotations:
-    components.dapr.io/container-image: "DOCKER_REPO/state-redis:latest" # required
+    components.dapr.io/container-image: "ghcr.io/mcandeia/dapr-components:latest" #required
     components.dapr.io/container-volume-mounts: "volume-name;/volume-path,volume-name-2;/volume-path-2" # optional
-    components.dapr.io/container-env: "env-var;env-var-value,env-var-2;env-var-value-2"
+    components.dapr.io/container-env: "env-var;env-var-value,env-var-2;env-var-value-2" #optional
 spec:
-  type: state.redis-pluggable
-  initTimeout: 1m
+  type: bindings.jsonlogic
   version: v1
-  metadata:
-    - name: redisHost
-      value: redis-svc.default.svc.cluster.local:6379
-    - name: redisPassword
-      value: ""
+  metadata: []
 ```
 
 By default the operator creates undeclared volumes as `emptyDir` volumes, if you want a different volume type you should declare it by yourself in your deploments.
