@@ -3,6 +3,21 @@ entries:
   dapr-pluggable-components-operator:
   - apiVersion: v1
     appVersion: "1.0"
+    created: "2022-10-26T12:41:15.349396508Z"
+    description: A Helm chart for Dapr pluggable components operator on Kubernetes
+    digest: a54d9445eb61bd794d54b844a452005b28a97d96961579de1c7c262c260633e2
+    maintainers:
+    - email: marcoscandeia123@gmail.com
+      name: mcandeia
+    name: dapr-pluggable-components-operator
+    sources:
+    - https://github.com/mcandeia/dapr-pluggable-components-operator
+    type: application
+    urls:
+    - https://github.com/mcandeia/dapr-pluggable-components-operator/releases/download/dapr-pluggable-components-operator-0.1.1/dapr-pluggable-components-operator-0.1.1.tgz
+    version: 0.1.1
+  - apiVersion: v1
+    appVersion: "1.0"
     created: "2022-10-26T01:57:46.003764041Z"
     description: A Helm chart for dapr pluggable components operator on Kubernetes
     digest: 8b47f8a640512a38d6eca57db7c3f0e2f7c6f07cbd54f31c1abbfc94399546c7
@@ -16,4 +31,4 @@ entries:
     urls:
     - https://github.com/mcandeia/dapr-pluggable-components-operator/releases/download/dapr-pluggable-components-operator-0.1.0/dapr-pluggable-components-operator-0.1.0.tgz
     version: 0.1.0
-generated: "2022-10-26T01:57:46.003778041Z"
+generated: "2022-10-26T12:41:15.349408508Z"
