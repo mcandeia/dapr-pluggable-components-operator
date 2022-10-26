@@ -153,7 +153,7 @@ func (r *PodReconciler) getContainers(sharedSocketVolumeMount corev1.VolumeMount
 		return nil, nil, "", err
 	}
 
-	return componentContainers, volumes, hex.EncodeToString(h.Sum(nil)), nil
+	return componentContainers, volumes, hex.EncodeToString(h.Sum(nil))[:63], nil
 }
 
 //+kubebuilder:rbac:groups=core,resources=pods,verbs=get;list;watch;create;update;patch;delete
@@ -203,6 +203,10 @@ func (r *PodReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.R
 	if err != nil {
 		log.Error(err, "error when getting containers")
 		return ctrl.Result{}, err
+	}
+
+	if pod.Labels == nil {
+		pod.Labels = make(map[string]string)
 	}
 
 	if hash == pod.Labels[checkSumComponentsPodLabel] { // nothing has changed

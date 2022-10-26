@@ -82,6 +82,7 @@ var _ = Describe("Pod custom controller", func() {
 							daprEnabledAnnotation:                 "true",
 							autoInjectComponentsEnabledAnnotation: "true",
 						},
+						Labels: map[string]string{},
 					},
 					Spec: corev1.PodSpec{
 						Containers: []corev1.Container{{
