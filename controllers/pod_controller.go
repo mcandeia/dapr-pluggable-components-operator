@@ -20,6 +20,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"fmt"
 	"sort"
 	"strings"
 
@@ -81,6 +82,7 @@ func toEnvVariables(envAnnotation string) []corev1.EnvVar {
 func toVolumeMounts(mountAnnotation string) ([]corev1.VolumeMount, []corev1.Volume) {
 	volumeMounts := make([]corev1.VolumeMount, 0)
 	volumes := make([]corev1.Volume, 0)
+
 	if mountAnnotation == "" {
 		return volumeMounts, volumes
 	}
@@ -110,6 +112,8 @@ func (r *PodReconciler) buildContainers(sharedSocketVolumeMount corev1.VolumeMou
 	componentContainers := make([]corev1.Container, 0)
 	volumes := make([]corev1.Volume, 0)
 	componentImages := make(map[string]bool, 0)
+	containersImagesStr := make([]string, 0)
+
 	for _, component := range components {
 		containerImage := component.Annotations[containerImageAnnotation]
 		if containerImage == "" || componentImages[containerImage] {
@@ -133,6 +137,7 @@ func (r *PodReconciler) buildContainers(sharedSocketVolumeMount corev1.VolumeMou
 			volumeMounts, podVolumes := toVolumeMounts(component.Annotations[volumeMountsAnnotation])
 			volumes = append(volumes, podVolumes...)
 			componentImages[containerImage] = true
+			containersImagesStr = append(containersImagesStr, containerImage)
 			componentContainers = append(componentContainers, corev1.Container{
 				Name:         component.Name,
 				Image:        containerImage,
@@ -146,11 +151,6 @@ func (r *PodReconciler) buildContainers(sharedSocketVolumeMount corev1.VolumeMou
 		return componentContainers, volumes, "", nil
 	}
 
-	containersImagesStr := make([]string, 0)
-
-	for name := range componentImages {
-		containersImagesStr = append(containersImagesStr, name)
-	}
 	sort.Strings(containersImagesStr) // to keep consistency
 	h := sha256.New()
 	_, err := h.Write([]byte(strings.Join(containersImagesStr, "")))
@@ -168,10 +168,12 @@ func (r *PodReconciler) buildContainers(sharedSocketVolumeMount corev1.VolumeMou
 // move the current state of the cluster closer to the desired state.
 func (r *PodReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	log := log.FromContext(ctx)
+	log.Info("reconciliation started")
 
 	var pod corev1.Pod
 	if err := r.Get(ctx, req.NamespacedName, &pod); err != nil {
 		if apierrors.IsNotFound(err) {
+			log.Info("pod not found")
 			// we'll ignore not-found errors, since we can get them on deleted requests.
 			return ctrl.Result{}, nil
 		}
@@ -180,6 +182,7 @@ func (r *PodReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.R
 	}
 
 	if pod.DeletionTimestamp != nil {
+		log.Info("pod was deleted")
 		return ctrl.Result{}, nil
 	}
 
@@ -187,6 +190,8 @@ func (r *PodReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.R
 	if !shouldBeManaged {
 		return ctrl.Result{}, nil
 	}
+
+	log.Info("pod is eligible")
 
 	var components componentsapi.ComponentList
 
@@ -198,6 +203,8 @@ func (r *PodReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.R
 		}
 		return ctrl.Result{}, errors.Wrap(err, "error reading components")
 	}
+
+	log.Info(fmt.Sprintf("found %d components", len(components.Items)))
 
 	sharedSocketVolumeMount := corev1.VolumeMount{
 		Name:      daprComponentsSocketVolumeName,
@@ -215,6 +222,7 @@ func (r *PodReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.R
 	}
 
 	if hash == pod.Labels[checkSumComponentsPodLabel] { // nothing has changed
+		log.Info(fmt.Sprintf("pod is unmodified %s", hash))
 		return ctrl.Result{}, nil
 	}
 
@@ -238,7 +246,7 @@ func (r *PodReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.R
 
 	pod.Spec.Containers = append(pod.Spec.Containers, componentContainers...)
 
-	log.WithValues("containers", len(componentContainers)).Info("adding containers")
+	log.Info(fmt.Sprintf("adding %d new containers", len(componentContainers)))
 
 	for idx, container := range pod.Spec.Containers {
 		if container.Name == daprdContainerName {

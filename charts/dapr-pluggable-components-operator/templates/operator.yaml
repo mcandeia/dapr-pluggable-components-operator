@@ -270,7 +270,7 @@ spec:
             - --leader-elect
           command:
             - /manager
-          image: localhost:5001/dapr-components-operator:latest
+          image: ghcr.io/mcandeia/dapr-pluggable-components-operator:latest
           livenessProbe:
             httpGet:
               path: /healthz

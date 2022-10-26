@@ -54,7 +54,6 @@ spec:
         items:
           - key: redis-config
             path: redis.conf
-
 ---
 apiVersion: v1
 kind: Service
@@ -75,12 +74,9 @@ spec:
 apiVersion: dapr.io/v1alpha1
 kind: Component
 metadata:
-  name: redis-pluggable
-  annotations:
-    components.dapr.io/container-image: "localhost:5001/state-redis:latest"
+  name: ledger-store
 spec:
-  type: state.redis-pluggable
-  initTimeout: 1m
+  type: state.redis
   version: v1
   metadata:
     - name: redisHost
@@ -91,11 +87,29 @@ spec:
 apiVersion: dapr.io/v1alpha1
 kind: Component
 metadata:
-  name: memory-pluggable
+  name: ledger
   annotations:
-    components.dapr.io/container-image: "localhost:5001/state-memory:latest"
+    components.dapr.io/container-image: "ghcr.io/mcandeia/dapr-components:latest"
 spec:
-  type: state.memory-pluggable
-  initTimeout: 1m
+  type: state.ledger
   version: v1
-  metadata: []
+  metadata:
+    - name: dapr-port
+      value: "50001"
+    - name: dapr-store
+      value: "ledger-store"
+---
+apiVersion: dapr.io/v1alpha1
+kind: Component
+metadata:
+  name: ledger-history
+  annotations:
+    components.dapr.io/container-image: "ghcr.io/mcandeia/dapr-components:latest"
+spec:
+  type: bindings.ledger
+  version: v1
+  metadata:
+    - name: dapr-port
+      value: "50001"
+    - name: dapr-store
+      value: "ledger-store"
