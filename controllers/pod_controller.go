@@ -136,6 +136,7 @@ func (r *PodReconciler) getContainers(sharedSocketVolumeMount corev1.VolumeMount
 			componentContainers = append(componentContainers, corev1.Container{
 				Name:         component.Name,
 				Image:        containerImage,
+				Env:          toEnvVariables(component.Annotations[containerEnvAnnotation]),
 				VolumeMounts: append(volumeMounts, sharedSocketVolumeMount),
 			})
 		}
@@ -182,8 +183,6 @@ func (r *PodReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.R
 		return ctrl.Result{}, nil
 	}
 
-	appID := pod.Annotations[appIDAnnotation]
-
 	var components componentsapi.ComponentList
 
 	if err := r.List(ctx, &components, &client.ListOptions{
@@ -192,7 +191,7 @@ func (r *PodReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.R
 		if apierrors.IsNotFound(err) {
 			return ctrl.Result{}, nil
 		}
-		return ctrl.Result{}, errors.Wrap(err, "error getting components")
+		return ctrl.Result{}, errors.Wrap(err, "error reading components")
 	}
 
 	sharedSocketVolumeMount := corev1.VolumeMount{
@@ -200,7 +199,7 @@ func (r *PodReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.R
 		MountPath: defaultSocketPath,
 	}
 
-	componentContainers, requiredContainersVolumes, hash, err := r.getContainers(sharedSocketVolumeMount, appID, components.Items)
+	componentContainers, requiredContainersVolumes, hash, err := r.getContainers(sharedSocketVolumeMount, pod.Annotations[appIDAnnotation], components.Items)
 	if err != nil {
 		log.Error(err, "error when getting containers")
 		return ctrl.Result{}, err
