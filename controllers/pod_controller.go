@@ -105,8 +105,8 @@ func toVolumeMounts(mountAnnotation string) ([]corev1.VolumeMount, []corev1.Volu
 	return volumeMounts, volumes
 }
 
-// getContainers return all required containers for such appID based on declared components.
-func (r *PodReconciler) getContainers(sharedSocketVolumeMount corev1.VolumeMount, appID string, components []componentsapi.Component) ([]corev1.Container, []corev1.Volume, string, error) {
+// buildContainers return all required containers for such appID based on declared components.
+func (r *PodReconciler) buildContainers(sharedSocketVolumeMount corev1.VolumeMount, appID string, components []componentsapi.Component) ([]corev1.Container, []corev1.Volume, string, error) {
 	componentContainers := make([]corev1.Container, 0)
 	volumes := make([]corev1.Volume, 0)
 	componentImages := make(map[string]bool, 0)
@@ -204,9 +204,9 @@ func (r *PodReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.R
 		MountPath: defaultSocketPath,
 	}
 
-	componentContainers, requiredContainersVolumes, hash, err := r.getContainers(sharedSocketVolumeMount, pod.Annotations[appIDAnnotation], components.Items)
+	componentContainers, requiredContainersVolumes, hash, err := r.buildContainers(sharedSocketVolumeMount, pod.Annotations[appIDAnnotation], components.Items)
 	if err != nil {
-		log.Error(err, "error when getting containers")
+		log.Error(err, "error when building containers")
 		return ctrl.Result{}, err
 	}
 
