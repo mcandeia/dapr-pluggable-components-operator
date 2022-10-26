@@ -7,5 +7,5 @@ maintainers:
 name: dapr-pluggable-components-operator
 sources:
   - https://github.com/mcandeia/dapr-pluggable-components-operator
-version: 0.1.0
+version: 0.1.1
 type: application
