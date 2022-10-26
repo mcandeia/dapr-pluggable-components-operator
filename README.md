@@ -6,6 +6,11 @@ A custom Kubernetes Pod Controller for automatically inject [Dapr](https://dapr.
 
 ## Step 1: Install the Operator
 
+```shell
+helm repo add my-repo https://mcandeia.github.io/dapr-pluggable-components-operator
+helm install my-release my-repo/dapr-pluggable-components-operator
+```
+
 ## Step 2: Annotate your deployments
 
 Your deployment annotations tells if the pluggable components operator should take your pod and inject the containers or not. This is achieved by annotating them with `components.dapr.io/enabled: "true"`. That way your deployments the operator will consider your deployment eligible to inject component containers.
