@@ -109,7 +109,7 @@ func toVolumeMounts(mountAnnotation string) ([]corev1.VolumeMount, []corev1.Volu
 func (r *PodReconciler) getContainers(sharedSocketVolumeMount corev1.VolumeMount, appID string, components []componentsapi.Component) ([]corev1.Container, []corev1.Volume, string, error) {
 	componentContainers := make([]corev1.Container, 0)
 	volumes := make([]corev1.Volume, 0)
-	presetHashes := make([]string, 0)
+	containersImages := make([]string, 0)
 	for _, component := range components {
 		containerImage := component.Annotations[containerImageAnnotation]
 		if containerImage == "" {
@@ -132,7 +132,7 @@ func (r *PodReconciler) getContainers(sharedSocketVolumeMount corev1.VolumeMount
 		if appScopped {
 			volumeMounts, podVolumes := toVolumeMounts(component.Annotations[volumeMountsAnnotation])
 			volumes = append(volumes, podVolumes...)
-			presetHashes = append(presetHashes, containerImage)
+			containersImages = append(containersImages, containerImage)
 			componentContainers = append(componentContainers, corev1.Container{
 				Name:         component.Name,
 				Image:        containerImage,
@@ -145,9 +145,9 @@ func (r *PodReconciler) getContainers(sharedSocketVolumeMount corev1.VolumeMount
 		return componentContainers, volumes, "", nil
 	}
 
-	sort.Strings(presetHashes) // to keep consistency
+	sort.Strings(containersImages) // to keep consistency
 	h := sha256.New()
-	_, err := h.Write([]byte(strings.Join(presetHashes, "")))
+	_, err := h.Write([]byte(strings.Join(containersImages, "")))
 	if err != nil {
 		return nil, nil, "", err
 	}

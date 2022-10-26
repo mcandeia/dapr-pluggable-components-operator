@@ -1,6 +1,6 @@
 # Dapr Pluggable Components Operator
 
-A custom Kubernetes Pod Controller for automatically inject [Dapr](https://dapr.io/) pluggable components in your pods.
+A custom Kubernetes Pod Controller for automatically inject [Dapr](https://dapr.io/) pluggable components containers based on declared Dapr components.
 
 # TLDR
 
@@ -61,14 +61,6 @@ spec:
       value: redis-svc.default.svc.cluster.local:6379
     - name: redisPassword
       value: ""
-    - name: processingTimeout
-      value: 1m
-    - name: redeliverInterval
-      value: 10s
-    - name: idleCheckFrequency
-      value: 5s
-    - name: readTimeout
-      value: 5s
 ```
 
 Optionally you can mount volumes and add env variables into the containers by using the `components.dapr.io/container-volume-mounts` and `components.dapr.io/container-env` annotations and use `;` to separate the volume name and its path and `,` to separate volume mount.
@@ -91,14 +83,6 @@ spec:
       value: redis-svc.default.svc.cluster.local:6379
     - name: redisPassword
       value: ""
-    - name: processingTimeout
-      value: 1m
-    - name: redeliverInterval
-      value: 10s
-    - name: idleCheckFrequency
-      value: 5s
-    - name: readTimeout
-      value: 5s
 ```
 
 By default the operator creates undeclared volumes as `emptyDir` volumes, if you want a different volume type you should declare it by yourself in your deploments.
