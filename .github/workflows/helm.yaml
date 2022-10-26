@@ -14,9 +14,7 @@
 name: helm-publish
 
 on:
-  push:
-    branches:
-      - "main"
+  workflow_dispatch:
 
 jobs:
   helm-publish:
