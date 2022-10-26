@@ -87,14 +87,6 @@ spec:
       value: redis-svc.default.svc.cluster.local:6379
     - name: redisPassword
       value: ""
-    - name: processingTimeout
-      value: 1m
-    - name: redeliverInterval
-      value: 10s
-    - name: idleCheckFrequency
-      value: 5s
-    - name: readTimeout
-      value: 5s
 ---
 apiVersion: dapr.io/v1alpha1
 kind: Component
